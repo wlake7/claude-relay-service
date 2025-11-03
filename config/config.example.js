@@ -85,7 +85,15 @@ const config = {
     defaultTokenLimit: parseInt(process.env.DEFAULT_TOKEN_LIMIT) || 1000000
   },
 
-  // 📝 日志配置
+  // � 费用计算配置
+  billing: {
+    // 费用乘数系数 - 用于在原有费用基础上进行调整
+    // 例如：设置为 1.2 表示所有费用在原价基础上增加20%
+    // 设置为 1.0 表示使用原价（默认值）
+    costMultiplier: parseFloat(process.env.COST_MULTIPLIER) || 1.0
+  },
+
+  // �📝 日志配置
   logging: {
     level: process.env.LOG_LEVEL || 'info',
     dirname: path.join(__dirname, '..', 'logs'),

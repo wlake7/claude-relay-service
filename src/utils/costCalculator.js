@@ -1,4 +1,5 @@
 const pricingService = require('../services/pricingService')
+const config = require('../../config/config')
 
 // Claude模型价格配置 (USD per 1M tokens) - 备用定价
 const MODEL_PRICING = {
@@ -73,6 +74,26 @@ const MODEL_PRICING = {
 
 class CostCalculator {
   /**
+   * 获取费用乘数系数
+   * @returns {number} 费用乘数系数（默认1.0）
+   */
+  static getCostMultiplier() {
+    const multiplier = config.billing?.costMultiplier ?? 1.0
+    // 验证系数有效性，必须为正数
+    return multiplier > 0 ? multiplier : 1.0
+  }
+
+  /**
+   * 应用费用乘数系数
+   * @param {number} cost - 原始费用
+   * @returns {number} 应用系数后的费用
+   */
+  static applyCostMultiplier(cost) {
+    const multiplier = this.getCostMultiplier()
+    return cost * multiplier
+  }
+
+  /**
    * 计算单次请求的费用
    * @param {Object} usage - 使用量数据
    * @param {number} usage.input_tokens - 输入token数量
@@ -90,6 +111,7 @@ class CostCalculator {
     ) {
       const result = pricingService.calculateCost(usage, model)
       // 转换 pricingService 返回的格式到 costCalculator 的格式
+      // 注意：pricingService.calculateCost 已经应用了费用系数
       return {
         model,
         pricing: {
@@ -187,10 +209,19 @@ class CostCalculator {
 
     const totalCost = inputCost + outputCost + cacheWriteCost + cacheReadCost
 
+    // 应用费用乘数系数
+    const multiplier = this.getCostMultiplier()
+    const finalInputCost = this.applyCostMultiplier(inputCost)
+    const finalOutputCost = this.applyCostMultiplier(outputCost)
+    const finalCacheWriteCost = this.applyCostMultiplier(cacheWriteCost)
+    const finalCacheReadCost = this.applyCostMultiplier(cacheReadCost)
+    const finalTotalCost = this.applyCostMultiplier(totalCost)
+
     return {
       model,
       pricing,
       usingDynamicPricing,
+      costMultiplier: multiplier, // 返回使用的系数供调试
       usage: {
         inputTokens,
         outputTokens,
@@ -199,19 +230,19 @@ class CostCalculator {
         totalTokens: inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens
       },
       costs: {
-        input: inputCost,
-        output: outputCost,
-        cacheWrite: cacheWriteCost,
-        cacheRead: cacheReadCost,
-        total: totalCost
+        input: finalInputCost,
+        output: finalOutputCost,
+        cacheWrite: finalCacheWriteCost,
+        cacheRead: finalCacheReadCost,
+        total: finalTotalCost
       },
       // 格式化的费用字符串
       formatted: {
-        input: this.formatCost(inputCost),
-        output: this.formatCost(outputCost),
-        cacheWrite: this.formatCost(cacheWriteCost),
-        cacheRead: this.formatCost(cacheReadCost),
-        total: this.formatCost(totalCost)
+        input: this.formatCost(finalInputCost),
+        output: this.formatCost(finalOutputCost),
+        cacheWrite: this.formatCost(finalCacheWriteCost),
+        cacheRead: this.formatCost(finalCacheReadCost),
+        total: this.formatCost(finalTotalCost)
       },
       // 添加调试信息
       debug: {

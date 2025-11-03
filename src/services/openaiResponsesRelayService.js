@@ -858,7 +858,11 @@ class OpenAIResponsesRelayService {
 
     const inputCost = (inputTokens / 1000) * rate.input
     const outputCost = (outputTokens / 1000) * rate.output
-    return inputCost + outputCost
+    const baseCost = inputCost + outputCost
+    
+    // 应用费用乘数系数
+    const multiplier = config.billing?.costMultiplier ?? 1.0
+    return baseCost * (multiplier > 0 ? multiplier : 1.0)
   }
 }
 

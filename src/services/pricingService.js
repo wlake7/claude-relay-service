@@ -3,6 +3,7 @@ const path = require('path')
 const https = require('https')
 const crypto = require('crypto')
 const pricingSource = require('../../config/pricingSource')
+const config = require('../../config/config')
 const logger = require('../utils/logger')
 
 class PricingService {
@@ -496,6 +497,19 @@ class PricingService {
     return 0
   }
 
+  // 获取费用乘数系数
+  getCostMultiplier() {
+    const multiplier = config.billing?.costMultiplier ?? 1.0
+    // 验证系数有效性，必须为正数
+    return multiplier > 0 ? multiplier : 1.0
+  }
+
+  // 应用费用乘数系数
+  applyCostMultiplier(cost) {
+    const multiplier = this.getCostMultiplier()
+    return cost * multiplier
+  }
+
   // 计算使用费用
   calculateCost(usage, modelName) {
     // 检查是否为 1M 上下文模型
@@ -595,19 +609,30 @@ class PricingService {
       // 旧格式，所有缓存创建 tokens 都按 5 分钟价格计算（向后兼容）
       cacheCreateCost =
         (usage.cache_creation_input_tokens || 0) * (pricing?.cache_creation_input_token_cost || 0)
-      ephemeral5mCost = cacheCreateCost
+      cacheCreateCost = ephemeral5mCost
     }
 
+    // 应用费用乘数系数到所有费用
+    const multiplier = this.getCostMultiplier()
+    const finalInputCost = this.applyCostMultiplier(inputCost)
+    const finalOutputCost = this.applyCostMultiplier(outputCost)
+    const finalCacheCreateCost = this.applyCostMultiplier(cacheCreateCost)
+    const finalCacheReadCost = this.applyCostMultiplier(cacheReadCost)
+    const finalEphemeral5mCost = this.applyCostMultiplier(ephemeral5mCost)
+    const finalEphemeral1hCost = this.applyCostMultiplier(ephemeral1hCost)
+    const finalTotalCost = finalInputCost + finalOutputCost + finalCacheCreateCost + finalCacheReadCost
+
     return {
-      inputCost,
-      outputCost,
-      cacheCreateCost,
-      cacheReadCost,
-      ephemeral5mCost,
-      ephemeral1hCost,
-      totalCost: inputCost + outputCost + cacheCreateCost + cacheReadCost,
+      inputCost: finalInputCost,
+      outputCost: finalOutputCost,
+      cacheCreateCost: finalCacheCreateCost,
+      cacheReadCost: finalCacheReadCost,
+      ephemeral5mCost: finalEphemeral5mCost,
+      ephemeral1hCost: finalEphemeral1hCost,
+      totalCost: finalTotalCost,
       hasPricing: true,
       isLongContextRequest,
+      costMultiplier: multiplier, // 返回使用的系数供调试
       pricing: {
         input: useLongContextPricing
           ? (
