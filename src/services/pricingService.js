@@ -510,8 +510,19 @@ class PricingService {
     return cost * multiplier
   }
 
-  // 计算使用费用
+  // 计算原始费用（不应用乘数系数，用于后端账户窗口限制判断）
+  calculateRawCost(usage, modelName) {
+    return this._calculateCostInternal(usage, modelName, false)
+  }
+
+  // 计算使用费用（应用乘数系数，用于前端显示和API Key限制）
+  // 注意：此方法会同时放大费用和tokens，保持费用/tokens比例不变
   calculateCost(usage, modelName) {
+    return this._calculateCostInternal(usage, modelName, true)
+  }
+
+  // 内部费用计算方法
+  _calculateCostInternal(usage, modelName, applyMultiplier = true) {
     // 检查是否为 1M 上下文模型
     const isLongContextModel = modelName && modelName.includes('[1m]')
     let isLongContextRequest = false
@@ -612,15 +623,56 @@ class PricingService {
       cacheCreateCost = ephemeral5mCost
     }
 
-    // 应用费用乘数系数到所有费用
+    // 根据参数决定是否应用费用乘数系数
+    let finalInputCost, finalOutputCost, finalCacheCreateCost, finalCacheReadCost
+    let finalEphemeral5mCost, finalEphemeral1hCost, finalTotalCost
     const multiplier = this.getCostMultiplier()
-    const finalInputCost = this.applyCostMultiplier(inputCost)
-    const finalOutputCost = this.applyCostMultiplier(outputCost)
-    const finalCacheCreateCost = this.applyCostMultiplier(cacheCreateCost)
-    const finalCacheReadCost = this.applyCostMultiplier(cacheReadCost)
-    const finalEphemeral5mCost = this.applyCostMultiplier(ephemeral5mCost)
-    const finalEphemeral1hCost = this.applyCostMultiplier(ephemeral1hCost)
-    const finalTotalCost = finalInputCost + finalOutputCost + finalCacheCreateCost + finalCacheReadCost
+
+    if (applyMultiplier) {
+      // 应用费用乘数系数到所有费用（用于前端显示和API Key限制）
+      finalInputCost = this.applyCostMultiplier(inputCost)
+      finalOutputCost = this.applyCostMultiplier(outputCost)
+      finalCacheCreateCost = this.applyCostMultiplier(cacheCreateCost)
+      finalCacheReadCost = this.applyCostMultiplier(cacheReadCost)
+      finalEphemeral5mCost = this.applyCostMultiplier(ephemeral5mCost)
+      finalEphemeral1hCost = this.applyCostMultiplier(ephemeral1hCost)
+    } else {
+      // 不应用乘数系数（用于后端账户窗口限制判断）
+      finalInputCost = inputCost
+      finalOutputCost = outputCost
+      finalCacheCreateCost = cacheCreateCost
+      finalCacheReadCost = cacheReadCost
+      finalEphemeral5mCost = ephemeral5mCost
+      finalEphemeral1hCost = ephemeral1hCost
+    }
+
+    finalTotalCost = finalInputCost + finalOutputCost + finalCacheCreateCost + finalCacheReadCost
+
+    // 获取原始tokens数量
+    const rawInputTokens = usage.input_tokens || 0
+    const rawOutputTokens = usage.output_tokens || 0
+    const rawCacheCreateTokens = usage.cache_creation_input_tokens || 0
+    const rawCacheReadTokens = usage.cache_read_input_tokens || 0
+
+    // 根据是否应用乘数，决定返回的tokens数量
+    // 如果应用乘数，tokens也要乘以相同系数，保持费用/tokens比例不变
+    let finalInputTokens, finalOutputTokens, finalCacheCreateTokens, finalCacheReadTokens, finalTotalTokens
+    
+    if (applyMultiplier) {
+      // tokens也应用乘数系数，保持费用/tokens比例不变
+      finalInputTokens = Math.round(rawInputTokens * multiplier)
+      finalOutputTokens = Math.round(rawOutputTokens * multiplier)
+      finalCacheCreateTokens = Math.round(rawCacheCreateTokens * multiplier)
+      finalCacheReadTokens = Math.round(rawCacheReadTokens * multiplier)
+      finalTotalTokens = finalInputTokens + finalOutputTokens + finalCacheCreateTokens + finalCacheReadTokens
+    } else {
+      // 不应用乘数，使用原始tokens
+      finalInputTokens = rawInputTokens
+      finalOutputTokens = rawOutputTokens
+      finalCacheCreateTokens = rawCacheCreateTokens
+      finalCacheReadTokens = rawCacheReadTokens
+      finalTotalTokens = rawInputTokens + rawOutputTokens + rawCacheCreateTokens + rawCacheReadTokens
+    }
 
     return {
       inputCost: finalInputCost,
@@ -630,9 +682,16 @@ class PricingService {
       ephemeral5mCost: finalEphemeral5mCost,
       ephemeral1hCost: finalEphemeral1hCost,
       totalCost: finalTotalCost,
+      // 添加tokens信息（也应用了乘数系数）
+      inputTokens: finalInputTokens,
+      outputTokens: finalOutputTokens,
+      cacheCreateTokens: finalCacheCreateTokens,
+      cacheReadTokens: finalCacheReadTokens,
+      totalTokens: finalTotalTokens,
       hasPricing: true,
       isLongContextRequest,
-      costMultiplier: multiplier, // 返回使用的系数供调试
+      costMultiplier: applyMultiplier ? multiplier : 1.0, // 返回使用的系数供调试
+      isMultiplierApplied: applyMultiplier, // 标记是否应用了乘数
       pricing: {
         input: useLongContextPricing
           ? (

@@ -893,9 +893,8 @@ class ApiKeyService {
     accountId = null
   ) {
     try {
-      const totalTokens = inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens
-
-      // 计算费用
+      // 注意：传入的tokens参数应该已经是缩放后的值
+      // 但为了保证一致性，我们重新计算并使用costInfo中的tokens
       const CostCalculator = require('../utils/costCalculator')
       const costInfo = CostCalculator.calculateCost(
         {
@@ -907,21 +906,28 @@ class ApiKeyService {
         model
       )
 
+      // 使用costInfo中的tokens（已应用乘数系数）
+      const finalInputTokens = costInfo.usage?.inputTokens !== undefined ? costInfo.usage.inputTokens : inputTokens
+      const finalOutputTokens = costInfo.usage?.outputTokens !== undefined ? costInfo.usage.outputTokens : outputTokens
+      const finalCacheCreateTokens = costInfo.usage?.cacheCreateTokens !== undefined ? costInfo.usage.cacheCreateTokens : cacheCreateTokens
+      const finalCacheReadTokens = costInfo.usage?.cacheReadTokens !== undefined ? costInfo.usage.cacheReadTokens : cacheReadTokens
+      const finalTotalTokens = costInfo.usage?.totalTokens !== undefined ? costInfo.usage.totalTokens : (inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens)
+
       // 检查是否为 1M 上下文请求
       let isLongContextRequest = false
       if (model && model.includes('[1m]')) {
-        const totalInputTokens = inputTokens + cacheCreateTokens + cacheReadTokens
+        const totalInputTokens = finalInputTokens + finalCacheCreateTokens + finalCacheReadTokens
         isLongContextRequest = totalInputTokens > 200000
       }
 
-      // 记录API Key级别的使用统计
+      // 记录API Key级别的使用统计（使用缩放后的tokens）
       await redis.incrementTokenUsage(
         keyId,
-        totalTokens,
-        inputTokens,
-        outputTokens,
-        cacheCreateTokens,
-        cacheReadTokens,
+        finalTotalTokens,
+        finalInputTokens,
+        finalOutputTokens,
+        finalCacheCreateTokens,
+        finalCacheReadTokens,
         model,
         0, // ephemeral5mTokens - 暂时为0，后续处理
         0, // ephemeral1hTokens - 暂时为0，后续处理
@@ -949,16 +955,16 @@ class ApiKeyService {
         if (accountId) {
           await redis.incrementAccountUsage(
             accountId,
-            totalTokens,
-            inputTokens,
-            outputTokens,
-            cacheCreateTokens,
-            cacheReadTokens,
+            finalTotalTokens,
+            finalInputTokens,
+            finalOutputTokens,
+            finalCacheCreateTokens,
+            finalCacheReadTokens,
             model,
             isLongContextRequest
           )
           logger.database(
-            `📊 Recorded account usage: ${accountId} - ${totalTokens} tokens (API Key: ${keyId})`
+            `📊 Recorded account usage: ${accountId} - ${finalTotalTokens} tokens (API Key: ${keyId})`
           )
         } else {
           logger.debug(
@@ -967,29 +973,29 @@ class ApiKeyService {
         }
       }
 
-      // 记录单次请求的使用详情
+      // 记录单次请求的使用详情（使用缩放后的tokens）
       const usageCost = costInfo && costInfo.costs ? costInfo.costs.total || 0 : 0
       await redis.addUsageRecord(keyId, {
         timestamp: new Date().toISOString(),
         model,
         accountId: accountId || null,
-        inputTokens,
-        outputTokens,
-        cacheCreateTokens,
-        cacheReadTokens,
-        totalTokens,
+        inputTokens: finalInputTokens,
+        outputTokens: finalOutputTokens,
+        cacheCreateTokens: finalCacheCreateTokens,
+        cacheReadTokens: finalCacheReadTokens,
+        totalTokens: finalTotalTokens,
         cost: Number(usageCost.toFixed(6)),
         costBreakdown: costInfo && costInfo.costs ? costInfo.costs : undefined
       })
 
-      const logParts = [`Model: ${model}`, `Input: ${inputTokens}`, `Output: ${outputTokens}`]
-      if (cacheCreateTokens > 0) {
-        logParts.push(`Cache Create: ${cacheCreateTokens}`)
+      const logParts = [`Model: ${model}`, `Input: ${finalInputTokens}`, `Output: ${finalOutputTokens}`]
+      if (finalCacheCreateTokens > 0) {
+        logParts.push(`Cache Create: ${finalCacheCreateTokens}`)
       }
-      if (cacheReadTokens > 0) {
-        logParts.push(`Cache Read: ${cacheReadTokens}`)
+      if (finalCacheReadTokens > 0) {
+        logParts.push(`Cache Read: ${finalCacheReadTokens}`)
       }
-      logParts.push(`Total: ${totalTokens} tokens`)
+      logParts.push(`Total: ${finalTotalTokens} tokens`)
 
       logger.database(`📊 Recorded usage: ${keyId} - ${logParts.join(', ')}`)
     } catch (error) {
@@ -1035,13 +1041,13 @@ class ApiKeyService {
     accountType = null
   ) {
     try {
-      // 提取 token 数量
-      const inputTokens = usageObject.input_tokens || 0
-      const outputTokens = usageObject.output_tokens || 0
-      const cacheCreateTokens = usageObject.cache_creation_input_tokens || 0
-      const cacheReadTokens = usageObject.cache_read_input_tokens || 0
+      // 提取 token 数量（原始值）
+      const rawInputTokens = usageObject.input_tokens || 0
+      const rawOutputTokens = usageObject.output_tokens || 0
+      const rawCacheCreateTokens = usageObject.cache_creation_input_tokens || 0
+      const rawCacheReadTokens = usageObject.cache_read_input_tokens || 0
 
-      const totalTokens = inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens
+      const rawTotalTokens = rawInputTokens + rawOutputTokens + rawCacheCreateTokens + rawCacheReadTokens
 
       // 计算费用（支持详细的缓存类型）- 添加错误处理
       let costInfo = { totalCost: 0, ephemeral5mCost: 0, ephemeral1hCost: 0 }
@@ -1066,11 +1072,25 @@ class ApiKeyService {
             )
             costInfo = {
               totalCost: fallbackCost.costs.total,
+              inputTokens: fallbackCost.usage?.inputTokens,
+              outputTokens: fallbackCost.usage?.outputTokens,
+              cacheCreateTokens: fallbackCost.usage?.cacheCreateTokens,
+              cacheReadTokens: fallbackCost.usage?.cacheReadTokens,
+              totalTokens: fallbackCost.usage?.totalTokens,
               ephemeral5mCost: 0,
               ephemeral1hCost: 0
             }
           } else {
-            costInfo = { totalCost: 0, ephemeral5mCost: 0, ephemeral1hCost: 0 }
+            costInfo = { 
+              totalCost: 0, 
+              inputTokens: rawInputTokens,
+              outputTokens: rawOutputTokens,
+              cacheCreateTokens: rawCacheCreateTokens,
+              cacheReadTokens: rawCacheReadTokens,
+              totalTokens: rawTotalTokens,
+              ephemeral5mCost: 0, 
+              ephemeral1hCost: 0 
+            }
           }
         }
       } catch (pricingError) {
@@ -1086,6 +1106,11 @@ class ApiKeyService {
             )
             costInfo = {
               totalCost: fallbackCost.costs.total,
+              inputTokens: fallbackCost.usage?.inputTokens,
+              outputTokens: fallbackCost.usage?.outputTokens,
+              cacheCreateTokens: fallbackCost.usage?.cacheCreateTokens,
+              cacheReadTokens: fallbackCost.usage?.cacheReadTokens,
+              totalTokens: fallbackCost.usage?.totalTokens,
               ephemeral5mCost: 0,
               ephemeral1hCost: 0
             }
@@ -1094,6 +1119,13 @@ class ApiKeyService {
           logger.error(`❌ Fallback cost calculation also failed:`, fallbackError)
         }
       }
+
+      // 使用缩放后的tokens（从costInfo中获取，如果没有则使用原始值）
+      const inputTokens = costInfo.inputTokens !== undefined ? costInfo.inputTokens : rawInputTokens
+      const outputTokens = costInfo.outputTokens !== undefined ? costInfo.outputTokens : rawOutputTokens
+      const cacheCreateTokens = costInfo.cacheCreateTokens !== undefined ? costInfo.cacheCreateTokens : rawCacheCreateTokens
+      const cacheReadTokens = costInfo.cacheReadTokens !== undefined ? costInfo.cacheReadTokens : rawCacheReadTokens
+      const totalTokens = costInfo.totalTokens !== undefined ? costInfo.totalTokens : rawTotalTokens
 
       // 提取详细的缓存创建数据
       let ephemeral5mTokens = 0

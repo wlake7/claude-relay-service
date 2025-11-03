@@ -94,24 +94,48 @@ class CostCalculator {
   }
 
   /**
-   * 计算单次请求的费用
+   * 计算原始费用（不应用乘数系数，用于后端账户窗口限制判断）
+   * @param {Object} usage - 使用量数据
+   * @param {string} model - 模型名称
+   * @returns {Object} 费用详情（原始费用）
+   */
+  static calculateRawCost(usage, model = 'unknown') {
+    return this._calculateCostInternal(usage, model, false)
+  }
+
+  /**
+   * 计算单次请求的费用（应用乘数系数，用于前端显示和API Key限制）
    * @param {Object} usage - 使用量数据
    * @param {number} usage.input_tokens - 输入token数量
    * @param {number} usage.output_tokens - 输出token数量
    * @param {number} usage.cache_creation_input_tokens - 缓存创建token数量
    * @param {number} usage.cache_read_input_tokens - 缓存读取token数量
    * @param {string} model - 模型名称
-   * @returns {Object} 费用详情
+   * @returns {Object} 费用详情（应用乘数后）
    */
   static calculateCost(usage, model = 'unknown') {
+    return this._calculateCostInternal(usage, model, true)
+  }
+
+  /**
+   * 内部费用计算方法
+   * @param {Object} usage - 使用量数据
+   * @param {string} model - 模型名称
+   * @param {boolean} applyMultiplier - 是否应用费用乘数系数
+   * @returns {Object} 费用详情
+   */
+  static _calculateCostInternal(usage, model = 'unknown', applyMultiplier = true) {
     // 如果 usage 包含详细的 cache_creation 对象或是 1M 模型，使用 pricingService 来处理
     if (
       (usage.cache_creation && typeof usage.cache_creation === 'object') ||
       (model && model.includes('[1m]'))
     ) {
-      const result = pricingService.calculateCost(usage, model)
+      // 根据参数选择调用原始费用还是应用乘数的费用
+      const result = applyMultiplier
+        ? pricingService.calculateCost(usage, model)
+        : pricingService.calculateRawCost(usage, model)
+      
       // 转换 pricingService 返回的格式到 costCalculator 的格式
-      // 注意：pricingService.calculateCost 已经应用了费用系数
       return {
         model,
         pricing: {
@@ -122,16 +146,20 @@ class CostCalculator {
         },
         usingDynamicPricing: true,
         isLongContextRequest: result.isLongContextRequest || false,
+        isMultiplierApplied: applyMultiplier, // 标记是否应用了乘数
         usage: {
-          inputTokens: usage.input_tokens || 0,
-          outputTokens: usage.output_tokens || 0,
-          cacheCreateTokens: usage.cache_creation_input_tokens || 0,
-          cacheReadTokens: usage.cache_read_input_tokens || 0,
-          totalTokens:
+          // 如果pricingService返回了tokens，使用它（已应用乘数）
+          // 否则使用原始值
+          inputTokens: result.inputTokens !== undefined ? result.inputTokens : (usage.input_tokens || 0),
+          outputTokens: result.outputTokens !== undefined ? result.outputTokens : (usage.output_tokens || 0),
+          cacheCreateTokens: result.cacheCreateTokens !== undefined ? result.cacheCreateTokens : (usage.cache_creation_input_tokens || 0),
+          cacheReadTokens: result.cacheReadTokens !== undefined ? result.cacheReadTokens : (usage.cache_read_input_tokens || 0),
+          totalTokens: result.totalTokens !== undefined ? result.totalTokens : (
             (usage.input_tokens || 0) +
             (usage.output_tokens || 0) +
             (usage.cache_creation_input_tokens || 0) +
             (usage.cache_read_input_tokens || 0)
+          )
         },
         costs: {
           input: result.inputCost,
@@ -209,25 +237,53 @@ class CostCalculator {
 
     const totalCost = inputCost + outputCost + cacheWriteCost + cacheReadCost
 
-    // 应用费用乘数系数
+    // 根据参数决定是否应用费用乘数系数
+    let finalInputCost, finalOutputCost, finalCacheWriteCost, finalCacheReadCost, finalTotalCost
+    let finalInputTokens, finalOutputTokens, finalCacheCreateTokens, finalCacheReadTokens, finalTotalTokens
     const multiplier = this.getCostMultiplier()
-    const finalInputCost = this.applyCostMultiplier(inputCost)
-    const finalOutputCost = this.applyCostMultiplier(outputCost)
-    const finalCacheWriteCost = this.applyCostMultiplier(cacheWriteCost)
-    const finalCacheReadCost = this.applyCostMultiplier(cacheReadCost)
-    const finalTotalCost = this.applyCostMultiplier(totalCost)
+
+    if (applyMultiplier) {
+      // 应用费用乘数系数（用于前端显示和API Key限制）
+      finalInputCost = this.applyCostMultiplier(inputCost)
+      finalOutputCost = this.applyCostMultiplier(outputCost)
+      finalCacheWriteCost = this.applyCostMultiplier(cacheWriteCost)
+      finalCacheReadCost = this.applyCostMultiplier(cacheReadCost)
+      finalTotalCost = this.applyCostMultiplier(totalCost)
+      
+      // tokens也应用乘数系数，保持费用/tokens比例不变
+      finalInputTokens = Math.round(inputTokens * multiplier)
+      finalOutputTokens = Math.round(outputTokens * multiplier)
+      finalCacheCreateTokens = Math.round(cacheCreateTokens * multiplier)
+      finalCacheReadTokens = Math.round(cacheReadTokens * multiplier)
+      finalTotalTokens = finalInputTokens + finalOutputTokens + finalCacheCreateTokens + finalCacheReadTokens
+    } else {
+      // 不应用乘数系数（用于后端账户窗口限制判断）
+      finalInputCost = inputCost
+      finalOutputCost = outputCost
+      finalCacheWriteCost = cacheWriteCost
+      finalCacheReadCost = cacheReadCost
+      finalTotalCost = totalCost
+      
+      // 不应用乘数，使用原始tokens
+      finalInputTokens = inputTokens
+      finalOutputTokens = outputTokens
+      finalCacheCreateTokens = cacheCreateTokens
+      finalCacheReadTokens = cacheReadTokens
+      finalTotalTokens = inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens
+    }
 
     return {
       model,
       pricing,
       usingDynamicPricing,
-      costMultiplier: multiplier, // 返回使用的系数供调试
+      costMultiplier: applyMultiplier ? multiplier : 1.0, // 返回使用的系数供调试
+      isMultiplierApplied: applyMultiplier, // 标记是否应用了乘数
       usage: {
-        inputTokens,
-        outputTokens,
-        cacheCreateTokens,
-        cacheReadTokens,
-        totalTokens: inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens
+        inputTokens: finalInputTokens,
+        outputTokens: finalOutputTokens,
+        cacheCreateTokens: finalCacheCreateTokens,
+        cacheReadTokens: finalCacheReadTokens,
+        totalTokens: finalTotalTokens
       },
       costs: {
         input: finalInputCost,

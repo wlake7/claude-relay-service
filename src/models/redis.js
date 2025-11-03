@@ -824,8 +824,9 @@ class RedisClient {
           cache_read_input_tokens: parseInt(modelUsage.cacheReadTokens || 0)
         }
 
-        // 使用CostCalculator计算费用
-        const costResult = CostCalculator.calculateCost(usage, model)
+        // 注意：Redis中存储的tokens已经被costMultiplier缩放过
+        // 使用calculateRawCost()可以得到：已缩放tokens × 原始单价 = 已缩放费用
+        const costResult = CostCalculator.calculateRawCost(usage, model)
         totalCost += costResult.costs.total
 
         logger.debug(

@@ -311,6 +311,7 @@ router.get('/api-keys', authenticateAdmin, async (req, res) => {
           let totalCost = 0
 
           // 计算每个模型的费用
+          // 注意：Redis中存储的tokens已经被costMultiplier缩放过，使用calculateRawCost()
           for (const [model, stats] of modelStatsMap) {
             const usage = {
               input_tokens: stats.inputTokens,
@@ -319,11 +320,12 @@ router.get('/api-keys', authenticateAdmin, async (req, res) => {
               cache_read_input_tokens: stats.cacheReadTokens
             }
 
-            const costResult = CostCalculator.calculateCost(usage, model)
+            const costResult = CostCalculator.calculateRawCost(usage, model)
             totalCost += costResult.costs.total
           }
 
           // 如果没有详细的模型数据，使用总量数据和默认模型计算
+          // 注意：Redis中存储的tokens已经被costMultiplier缩放过，使用calculateRawCost()
           if (modelStatsMap.size === 0) {
             const usage = {
               input_tokens: apiKey.usage.total.inputTokens || 0,
@@ -332,7 +334,7 @@ router.get('/api-keys', authenticateAdmin, async (req, res) => {
               cache_read_input_tokens: apiKey.usage.total.cacheReadTokens || 0
             }
 
-            const costResult = CostCalculator.calculateCost(usage, 'claude-3-5-haiku-20241022')
+            const costResult = CostCalculator.calculateRawCost(usage, 'claude-3-5-haiku-20241022')
             totalCost = costResult.costs.total
           }
 
@@ -460,6 +462,7 @@ router.get('/api-keys', authenticateAdmin, async (req, res) => {
         }
 
         // 计算费用
+        // 注意：Redis中存储的tokens已经被costMultiplier缩放过，使用calculateRawCost()
         for (const [model, stats] of modelStatsMap) {
           const usage = {
             input_tokens: stats.inputTokens,
@@ -468,11 +471,12 @@ router.get('/api-keys', authenticateAdmin, async (req, res) => {
             cache_read_input_tokens: stats.cacheReadTokens
           }
 
-          const costResult = CostCalculator.calculateCost(usage, model)
+          const costResult = CostCalculator.calculateRawCost(usage, model)
           totalCost += costResult.costs.total
         }
 
         // 如果没有模型数据，使用临时统计数据计算
+        // 注意：Redis中存储的tokens已经被costMultiplier缩放过，使用calculateRawCost()
         if (modelStatsMap.size === 0 && tempUsage.tokens > 0) {
           const usage = {
             input_tokens: tempUsage.inputTokens,
@@ -481,7 +485,7 @@ router.get('/api-keys', authenticateAdmin, async (req, res) => {
             cache_read_input_tokens: tempUsage.cacheReadTokens
           }
 
-          const costResult = CostCalculator.calculateCost(usage, 'claude-3-5-haiku-20241022')
+          const costResult = CostCalculator.calculateRawCost(usage, 'claude-3-5-haiku-20241022')
           totalCost = costResult.costs.total
         }
 
@@ -2168,7 +2172,8 @@ router.get('/claude-accounts', authenticateAdmin, async (req, res) => {
               }
 
               logger.debug(`💰 Calculating cost for model ${modelName}:`, JSON.stringify(usageData))
-              const costResult = CostCalculator.calculateCost(usageData, modelName)
+              // 注意：Redis中存储的tokens已经被costMultiplier缩放过，使用calculateRawCost()
+              const costResult = CostCalculator.calculateRawCost(usageData, modelName)
               logger.debug(`💰 Cost result for ${modelName}: total=${costResult.costs.total}`)
 
               modelCosts[modelName] = {
@@ -4465,7 +4470,8 @@ router.get('/accounts/:accountId/usage-history', authenticateAdmin, async (req, 
           cache_read_input_tokens: parseInt(modelData.cacheReadTokens) || 0
         }
 
-        const costResult = CostCalculator.calculateCost(usage, modelName)
+        // 注意：Redis中存储的tokens已经被costMultiplier缩放过，使用calculateRawCost()
+        const costResult = CostCalculator.calculateRawCost(usage, modelName)
         summedCost += costResult.costs.total
       }
 
@@ -4505,7 +4511,8 @@ router.get('/accounts/:accountId/usage-history', authenticateAdmin, async (req, 
           cache_creation_input_tokens: cacheCreateTokens,
           cache_read_input_tokens: cacheReadTokens
         }
-        const fallbackResult = CostCalculator.calculateCost(fallbackUsage, fallbackModel)
+        // 注意：Redis中存储的tokens已经被costMultiplier缩放过，使用calculateRawCost()
+        const fallbackResult = CostCalculator.calculateRawCost(fallbackUsage, fallbackModel)
         cost = fallbackResult.costs.total
       }
 
@@ -5216,7 +5223,8 @@ router.get('/model-stats', authenticateAdmin, async (req, res) => {
       }
 
       // 计算费用
-      const costData = CostCalculator.calculateCost(usage, model)
+      // 注意：Redis中存储的tokens已经被costMultiplier缩放过，使用calculateRawCost()
+      const costData = CostCalculator.calculateRawCost(usage, model)
 
       modelStats.push({
         model,
@@ -5379,7 +5387,8 @@ router.get('/usage-trend', authenticateAdmin, async (req, res) => {
               cache_creation_input_tokens: modelCacheCreateTokens,
               cache_read_input_tokens: modelCacheReadTokens
             }
-            const modelCostResult = CostCalculator.calculateCost(modelUsage, model)
+            // 注意：Redis中存储的tokens已经被costMultiplier缩放过，使用calculateRawCost()
+            const modelCostResult = CostCalculator.calculateRawCost(modelUsage, model)
             hourCost += modelCostResult.costs.total
           }
         }
@@ -5406,7 +5415,8 @@ router.get('/usage-trend', authenticateAdmin, async (req, res) => {
             cache_creation_input_tokens: hourCacheCreateTokens,
             cache_read_input_tokens: hourCacheReadTokens
           }
-          const costResult = CostCalculator.calculateCost(usage, 'unknown')
+          // 注意：Redis中存储的tokens已经被costMultiplier缩放过，使用calculateRawCost()
+          const costResult = CostCalculator.calculateRawCost(usage, 'unknown')
           hourCost = costResult.costs.total
         }
 
@@ -5493,7 +5503,8 @@ router.get('/usage-trend', authenticateAdmin, async (req, res) => {
               cache_creation_input_tokens: modelCacheCreateTokens,
               cache_read_input_tokens: modelCacheReadTokens
             }
-            const modelCostResult = CostCalculator.calculateCost(modelUsage, model)
+            // 注意：Redis中存储的tokens已经被costMultiplier缩放过，使用calculateRawCost()
+            const modelCostResult = CostCalculator.calculateRawCost(modelUsage, model)
             dayCost += modelCostResult.costs.total
           }
         }
@@ -5518,7 +5529,8 @@ router.get('/usage-trend', authenticateAdmin, async (req, res) => {
             cache_creation_input_tokens: dayCacheCreateTokens,
             cache_read_input_tokens: dayCacheReadTokens
           }
-          const costResult = CostCalculator.calculateCost(usage, 'unknown')
+          // 注意：Redis中存储的tokens已经被costMultiplier缩放过，使用calculateRawCost()
+          const costResult = CostCalculator.calculateRawCost(usage, 'unknown')
           dayCost = costResult.costs.total
         }
 
@@ -5662,7 +5674,8 @@ router.get('/api-keys/:keyId/model-stats', authenticateAdmin, async (req, res) =
       }
 
       // 使用CostCalculator计算费用
-      const costData = CostCalculator.calculateCost(usage, model)
+      // 注意：Redis中存储的tokens已经被costMultiplier缩放过，使用calculateRawCost()
+      const costData = CostCalculator.calculateRawCost(usage, model)
 
       modelStats.push({
         model,
@@ -5716,7 +5729,8 @@ router.get('/api-keys/:keyId/model-stats', authenticateAdmin, async (req, res) =
             }
 
             // 对于汇总数据，使用默认模型计算费用
-            const costData = CostCalculator.calculateCost(usage, 'claude-3-5-sonnet-20241022')
+            // 注意：Redis中存储的tokens已经被costMultiplier缩放过，使用calculateRawCost()
+            const costData = CostCalculator.calculateRawCost(usage, 'claude-3-5-sonnet-20241022')
 
             modelStats.push({
               model: '总体使用 (历史数据)',
@@ -5914,7 +5928,8 @@ router.get('/account-usage-trend', authenticateAdmin, async (req, res) => {
           cache_read_input_tokens: parseInt(modelData.cacheReadTokens) || 0
         }
 
-        const costResult = CostCalculator.calculateCost(usage, modelName)
+        // 注意：Redis中存储的tokens已经被costMultiplier缩放过，使用calculateRawCost()
+        const costResult = CostCalculator.calculateRawCost(usage, modelName)
         totalCost += costResult.costs.total
       }
 
@@ -5990,7 +6005,8 @@ router.get('/account-usage-trend', authenticateAdmin, async (req, res) => {
               cache_creation_input_tokens: cacheCreateTokens,
               cache_read_input_tokens: cacheReadTokens
             }
-            const fallbackResult = CostCalculator.calculateCost(fallbackUsage, fallbackModel)
+            // 注意：Redis中存储的tokens已经被costMultiplier缩放过，使用calculateRawCost()
+            const fallbackResult = CostCalculator.calculateRawCost(fallbackUsage, fallbackModel)
             cost = fallbackResult.costs.total
           }
 
@@ -6061,7 +6077,8 @@ router.get('/account-usage-trend', authenticateAdmin, async (req, res) => {
               cache_creation_input_tokens: cacheCreateTokens,
               cache_read_input_tokens: cacheReadTokens
             }
-            const fallbackResult = CostCalculator.calculateCost(fallbackUsage, fallbackModel)
+            // 注意：Redis中存储的tokens已经被costMultiplier缩放过，使用calculateRawCost()
+            const fallbackResult = CostCalculator.calculateRawCost(fallbackUsage, fallbackModel)
             cost = fallbackResult.costs.total
           }
 
@@ -6218,7 +6235,7 @@ router.get('/api-keys-usage-trend', authenticateAdmin, async (req, res) => {
               cache_read_input_tokens: parseInt(modelData.cacheReadTokens) || 0
             }
 
-            const costResult = CostCalculator.calculateCost(usage, model)
+            const costResult = CostCalculator.calculateRawCost(usage, model)
             const currentCost = apiKeyCostMap.get(apiKeyId) || 0
             apiKeyCostMap.set(apiKeyId, currentCost + costResult.costs.total)
           }
@@ -6239,7 +6256,7 @@ router.get('/api-keys-usage-trend', authenticateAdmin, async (req, res) => {
               cache_creation_input_tokens: data.cacheCreateTokens,
               cache_read_input_tokens: data.cacheReadTokens
             }
-            const fallbackResult = CostCalculator.calculateCost(usage, 'claude-3-5-sonnet-20241022')
+            const fallbackResult = CostCalculator.calculateRawCost(usage, 'claude-3-5-sonnet-20241022')
             finalCost = fallbackResult.costs.total
             formattedCost = fallbackResult.formatted.total
           }
@@ -6329,7 +6346,7 @@ router.get('/api-keys-usage-trend', authenticateAdmin, async (req, res) => {
               cache_read_input_tokens: parseInt(modelData.cacheReadTokens) || 0
             }
 
-            const costResult = CostCalculator.calculateCost(usage, model)
+            const costResult = CostCalculator.calculateRawCost(usage, model)
             const currentCost = apiKeyCostMap.get(apiKeyId) || 0
             apiKeyCostMap.set(apiKeyId, currentCost + costResult.costs.total)
           }
@@ -6350,7 +6367,7 @@ router.get('/api-keys-usage-trend', authenticateAdmin, async (req, res) => {
               cache_creation_input_tokens: data.cacheCreateTokens,
               cache_read_input_tokens: data.cacheReadTokens
             }
-            const fallbackResult = CostCalculator.calculateCost(usage, 'claude-3-5-sonnet-20241022')
+            const fallbackResult = CostCalculator.calculateRawCost(usage, 'claude-3-5-sonnet-20241022')
             finalCost = fallbackResult.costs.total
             formattedCost = fallbackResult.formatted.total
           }
@@ -6514,7 +6531,7 @@ router.get('/usage-costs', authenticateAdmin, async (req, res) => {
           cache_read_input_tokens: usage.cacheReadTokens
         }
 
-        const costResult = CostCalculator.calculateCost(usageData, model)
+        const costResult = CostCalculator.calculateRawCost(usageData, model)
         totalCosts.inputCost += costResult.costs.input
         totalCosts.outputCost += costResult.costs.output
         totalCosts.cacheCreateCost += costResult.costs.cacheWrite
@@ -6604,7 +6621,7 @@ router.get('/usage-costs', authenticateAdmin, async (req, res) => {
             cache_read_input_tokens: usage.cacheReadTokens
           }
 
-          const costResult = CostCalculator.calculateCost(usageData, model)
+          const costResult = CostCalculator.calculateRawCost(usageData, model)
           totalCosts.inputCost += costResult.costs.input
           totalCosts.outputCost += costResult.costs.output
           totalCosts.cacheCreateCost += costResult.costs.cacheWrite
@@ -6644,7 +6661,7 @@ router.get('/usage-costs', authenticateAdmin, async (req, res) => {
             }
 
             // 使用加权平均价格计算（基于当前活跃模型的价格分布）
-            const costResult = CostCalculator.calculateCost(usage, 'claude-3-5-haiku-20241022')
+            const costResult = CostCalculator.calculateRawCost(usage, 'claude-3-5-haiku-20241022')
             totalCosts.inputCost += costResult.costs.input
             totalCosts.outputCost += costResult.costs.output
             totalCosts.cacheCreateCost += costResult.costs.cacheWrite
@@ -6699,7 +6716,7 @@ router.get('/usage-costs', authenticateAdmin, async (req, res) => {
           cache_read_input_tokens: parseInt(data.cacheReadTokens) || 0
         }
 
-        const costResult = CostCalculator.calculateCost(usage, model)
+        const costResult = CostCalculator.calculateRawCost(usage, model)
 
         // 累加总费用
         totalCosts.inputCost += costResult.costs.input

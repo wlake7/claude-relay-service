@@ -240,6 +240,8 @@ router.post('/api/user-stats', async (req, res) => {
       }
 
       // 按模型计算费用并汇总
+      // 注意：Redis中存储的tokens已经被costMultiplier缩放过
+      // 使用calculateRawCost()可以得到：已缩放tokens × 原始单价 = 已缩放费用
       for (const [model, usage] of modelUsageMap) {
         const usageData = {
           input_tokens: usage.inputTokens,
@@ -248,11 +250,13 @@ router.post('/api/user-stats', async (req, res) => {
           cache_read_input_tokens: usage.cacheReadTokens
         }
 
-        const costResult = CostCalculator.calculateCost(usageData, model)
+        const costResult = CostCalculator.calculateRawCost(usageData, model)
         totalCost += costResult.costs.total
       }
 
       // 如果没有模型级别的详细数据，回退到总体数据计算
+      // 注意：Redis中存储的tokens已经被costMultiplier缩放过
+      // 使用calculateRawCost()可以得到：已缩放tokens × 原始单价 = 已缩放费用
       if (modelUsageMap.size === 0 && fullKeyData.usage?.total?.allTokens > 0) {
         const usage = fullKeyData.usage.total
         const costUsage = {
@@ -262,7 +266,7 @@ router.post('/api/user-stats', async (req, res) => {
           cache_read_input_tokens: usage.cacheReadTokens || 0
         }
 
-        const costResult = CostCalculator.calculateCost(costUsage, 'claude-3-5-sonnet-20241022')
+        const costResult = CostCalculator.calculateRawCost(costUsage, 'claude-3-5-sonnet-20241022')
         totalCost = costResult.costs.total
       }
 
@@ -270,6 +274,7 @@ router.post('/api/user-stats', async (req, res) => {
     } catch (error) {
       logger.warn(`Failed to calculate detailed cost for key ${keyId}:`, error)
       // 回退到简单计算
+      // 注意：Redis中存储的tokens已经被costMultiplier缩放过，使用calculateRawCost()
       if (fullKeyData.usage?.total?.allTokens > 0) {
         const usage = fullKeyData.usage.total
         const costUsage = {
@@ -279,7 +284,7 @@ router.post('/api/user-stats', async (req, res) => {
           cache_read_input_tokens: usage.cacheReadTokens || 0
         }
 
-        const costResult = CostCalculator.calculateCost(costUsage, 'claude-3-5-sonnet-20241022')
+        const costResult = CostCalculator.calculateRawCost(costUsage, 'claude-3-5-sonnet-20241022')
         totalCost = costResult.costs.total
         formattedCost = costResult.formatted.total
       }
@@ -742,6 +747,7 @@ router.post('/api/batch-model-stats', async (req, res) => {
     )
 
     // 转换为数组并计算费用
+    // 注意：Redis中存储的tokens已经被costMultiplier缩放过，使用calculateRawCost()
     const modelStats = []
     for (const [model, usage] of modelUsageMap) {
       const usageData = {
@@ -751,7 +757,7 @@ router.post('/api/batch-model-stats', async (req, res) => {
         cache_read_input_tokens: usage.cacheReadTokens
       }
 
-      const costData = CostCalculator.calculateCost(usageData, model)
+      const costData = CostCalculator.calculateRawCost(usageData, model)
 
       modelStats.push({
         model,
@@ -900,7 +906,8 @@ router.post('/api/user-model-stats', async (req, res) => {
           cache_read_input_tokens: parseInt(data.cacheReadTokens) || 0
         }
 
-        const costData = CostCalculator.calculateCost(usage, model)
+        // 注意：Redis中存储的tokens已经被costMultiplier缩放过，使用calculateRawCost()
+        const costData = CostCalculator.calculateRawCost(usage, model)
 
         modelStats.push({
           model,
